@@ -1,236 +1,172 @@
 #include <iostream>
-#include <fstream>
 #include <cstdlib>
 #include <ctime>
+#include <thread>
+#include <chrono>
+#include <conio.h>
 #include <windows.h>
 
 using namespace std;
 
-/* ================= PLAYER CLASS ================= */
+// ================= CURSOR =================
+void gotoXY(int x, int y) {
+    COORD coord;
+    coord.X = x;
+    coord.Y = y;
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
+}
 
+// ================= PLAYER =================
 class Player {
 private:
-    string name;
-    int lives;
     int score;
+    int lives;
 
 public:
-    Player(string n) {
-        name = n;
-        lives = 3;
+    Player() {
         score = 0;
+        lives = 3;
     }
 
     void addScore(int s) { score += s; }
     void loseLife() { lives--; }
 
-    int getLives() { return lives; }
     int getScore() { return score; }
-    string getName() { return name; }
+    int getLives() { return lives; }
 };
 
-/* ================= ABSTRACT QUESTION CLASS ================= */
-
+// ================= QUESTION =================
 class Question {
-protected:
-    int a, b;
-    char op;
-    int answer;
-    int points;
+private:
+    int a, b, ans;
 
 public:
-    virtual void generate() = 0;
-
-    bool checkAnswer(int userAns) {
-        return userAns == answer;
+    void generate() {
+        a = rand() % 10;
+        b = rand() % 10;
+        ans = a + b;
     }
 
-    int getPoints() { return points; }
+    int getAnswer() { return ans; }
 
-    string getQuestionText() {
-        return to_string(a) + " " + op + " " + to_string(b) + " = ?";
-    }
-
-    virtual ~Question() {}
-};
-
-/* ================= EASY QUESTION ================= */
-
-class EasyQuestion : public Question {
-public:
-    void generate() override {
-        a = rand() % 10 + 1;
-        b = rand() % 10 + 1;
-        op = '+';
-        answer = a + b;
-        points = 10;
+    string getText() {
+        return to_string(a) + " + " + to_string(b);
     }
 };
 
-/* ================= MEDIUM QUESTION ================= */
-
-class MediumQuestion : public Question {
-public:
-    void generate() override {
-        a = rand() % 15 + 5;
-        b = rand() % 10 + 1;
-        op = '-';
-        answer = a - b;
-        points = 20;
-    }
-};
-
-/* ================= HARD QUESTION ================= */
-
-class HardQuestion : public Question {
-public:
-    void generate() override {
-        a = rand() % 10 + 2;
-        b = rand() % 10 + 2;
-        op = '*';
-        answer = a * b;
-        points = 30;
-    }
-};
-
-/* ================= GAME CLASS ================= */
-
+// ================= GAME =================
 class Game {
 private:
-    Player* player;
-    int highScore;
+    Player player;
 
 public:
-    Game() {
-        highScore = loadHighScore();
-    }
+    void play() {
 
-    int loadHighScore() {
-        ifstream file("highscore.txt");
-        int hs = 0;
-        if (file >> hs) return hs;
-        return 0;
-    }
-
-    void saveHighScore(int score) {
-        if (score > highScore) {
-            ofstream file("highscore.txt");
-            file << score;
-            cout << "\n🎉 New High Score Saved!\n";
-        }
-    }
-
-    void showLives(int lives) {
-        cout << "Lives: ";
-        for (int i = 0; i < lives; i++) cout << "❤️ ";
-        cout << endl;
-    }
-
-    void showUI(string question, int pos) {
-        system("cls");
-
-        cout << "=============================\n";
-        cout << "        MATH DROP GAME        \n";
-        cout << "=============================\n";
-
-        showLives(player->getLives());
-
-        cout << "Score: " << player->getScore() << endl;
-        cout << "High Score: " << highScore << endl;
-
-        cout << "\n\n";
-
-        for (int i = 0; i < pos; i++)
-            cout << endl;
-
-        cout << "        " << question << endl;
-
-        cout << "\n-----------------------------\n";
-    }
-
-    Question* createQuestion() {
-        int r = rand() % 3;
-
-        Question* q;
-
-        if (r == 0) q = new EasyQuestion();
-        else if (r == 1) q = new MediumQuestion();
-        else q = new HardQuestion();
-
-        q->generate();
-        return q;
-    }
-
-    void start() {
         srand(time(0));
 
-        string name;
-        cout << "Enter Player Name: ";
-        cin >> name;
+        const int DEADLINE_Y = 18;
+        const int START_Y = 2;
 
-        player = new Player(name);
+        const int TOTAL_TIME_MS = 5000;   // 5 seconds
+        const int FRAME_DELAY = 50;       // smoothness
+        const int TOTAL_FRAMES = TOTAL_TIME_MS / FRAME_DELAY;
 
-        while (player->getLives() > 0) {
+        while (player.getLives() > 0) {
 
-            Question* q = createQuestion();
+            Question q;
+            q.generate();
 
-            string text = q->getQuestionText();
-
+            string input = "";
             bool answered = false;
-            int userAns;
 
-            for (int pos = 0; pos < 10; pos++) {
+            float position = START_Y;
+            float step = (float)(DEADLINE_Y - START_Y) / TOTAL_FRAMES;
 
-                showUI(text, pos);
+            for (int frame = 0; frame <= TOTAL_FRAMES; frame++) {
 
-                cout << "\nAnswer: ";
+                // Clear falling area
+                for (int i = START_Y; i <= DEADLINE_Y + 2; i++) {
+                    gotoXY(0, i);
+                    cout << "                                                ";
+                }
 
-                if (cin >> userAns) {
-                    if (q->checkAnswer(userAns)) {
-                        cout << "✅ Correct!\n";
-                        player->addScore(q->getPoints());
-                        answered = true;
-                        Sleep(800);
-                        break;
-                    } else {
-                        cout << "❌ Wrong!\n";
-                        player->loseLife();
-                        Sleep(800);
+                // Remaining time
+                int timeLeft = (TOTAL_FRAMES - frame) * FRAME_DELAY / 1000;
+
+                // Score + Timer
+                gotoXY(0, 0);
+                cout << "Lives: " << player.getLives()
+                     << "   Score: " << player.getScore()
+                     << "   Time Left: " << timeLeft << "s   ";
+
+                // Deadline line
+                gotoXY(0, DEADLINE_Y);
+                cout << "--------------------------------------------";
+                gotoXY(5, DEADLINE_Y);
+                cout << " ANSWER BEFORE THIS LINE ";
+
+                // Draw question
+                gotoXY(15, (int)position);
+                cout << q.getText() << " = ?";
+
+                // Input area
+                gotoXY(0, DEADLINE_Y + 3);
+                cout << "Your Answer: " << input << "   ";
+
+                // Keyboard input
+                if (_kbhit()) {
+                    char ch = _getch();
+
+                    if (ch == 13) { // ENTER
                         answered = true;
                         break;
                     }
+                    else if (ch == 8) { // BACKSPACE
+                        if (!input.empty())
+                            input.pop_back();
+                    }
+                    else if (isdigit(ch)) {
+                        input += ch;
+                    }
                 }
 
-                Sleep(500);
+                position += step;
+
+                this_thread::sleep_for(chrono::milliseconds(FRAME_DELAY));
             }
 
-            if (!answered) {
-                cout << "\nMissed! Question reached bottom!\n";
-                player->loseLife();
-                Sleep(800);
+            // ===== RESULT =====
+            if (answered && !input.empty()) {
+                int userAns = stoi(input);
+
+                if (userAns == q.getAnswer()) {
+                    gotoXY(0, DEADLINE_Y + 5);
+                    cout << "Correct!                 ";
+                    player.addScore(10);
+                } else {
+                    gotoXY(0, DEADLINE_Y + 5);
+                    cout << "Wrong!                   ";
+                    player.loseLife();
+                }
+            } else {
+                gotoXY(0, DEADLINE_Y + 5);
+                cout << "Time Up!                 ";
+                player.loseLife();
             }
 
-            delete q;
+            this_thread::sleep_for(chrono::seconds(1));
         }
 
-        system("cls");
-
-        cout << "=============================\n";
-        cout << "         GAME OVER            \n";
-        cout << "=============================\n";
-
-        cout << "Final Score: " << player->getScore() << endl;
-
-        saveHighScore(player->getScore());
-
-        delete player;
+        // ===== GAME OVER =====
+        gotoXY(0, DEADLINE_Y + 7);
+        cout << "===== GAME OVER =====\n";
+        cout << "Final Score: " << player.getScore() << endl;
     }
 };
 
-/* ================= MAIN ================= */
-
+// ================= MAIN =================
 int main() {
-    Game game;
-    game.start();
+    Game g;
+    g.play();
     return 0;
 }
