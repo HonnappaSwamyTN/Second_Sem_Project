@@ -36,21 +36,52 @@ public:
 };
 
 // ================= QUESTION =================
+
+// ================= QUESTION =================
 class Question {
 private:
     int a, b, ans;
+    char op;
 
 public:
     void generate() {
-        a = rand() % 10;
-        b = rand() % 10;
-        ans = a + b;
+
+        int operation = rand() % 4;  // 0=+, 1=-, 2=*, 3=/
+
+        if (operation == 0) { // Addition
+            a = rand() % 20;
+            b = rand() % 20;
+            ans = a + b;
+            op = '+';
+        }
+        else if (operation == 1) { // Subtraction
+            a = rand() % 20;
+            b = rand() % 20;
+            ans = a - b;
+            op = '-';
+        }
+        else if (operation == 2) { // Multiplication
+            a = rand() % 12;
+            b = rand() % 12;
+            ans = a * b;
+            op = '*';
+        }
+        else { // Division (safe integer division)
+
+            b = (rand() % 9) + 1;   // Never 0
+            ans = (rand() % 10) + 1;
+            a = b * ans;            // Ensures perfect division
+
+            op = '/';
+        }
     }
 
-    int getAnswer() { return ans; }
+    int getAnswer() {
+        return ans;
+    }
 
     string getText() {
-        return to_string(a) + " + " + to_string(b);
+        return to_string(a) + " " + op + " " + to_string(b);
     }
 };
 
