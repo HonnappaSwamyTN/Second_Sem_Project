@@ -1,203 +1,312 @@
 #include <iostream>
+#include <fstream>
+#include <string>
 #include <cstdlib>
 #include <ctime>
-#include <thread>
-#include <chrono>
-#include <conio.h>
 #include <windows.h>
-
+#include <conio.h>
 using namespace std;
 
-// ================= CURSOR =================
-void gotoXY(int x, int y) {
+/* ================= CONSOLE HELPER FUNCTIONS ================= */
+
+void gotoxy(int x, int y) {
     COORD coord;
     coord.X = x;
     coord.Y = y;
     SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), coord);
 }
 
-// ================= PLAYER =================
+void hideCursor() {
+    CONSOLE_CURSOR_INFO info;
+    info.dwSize = 1;
+    info.bVisible = FALSE;
+    SetConsoleCursorInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info);
+}
+
+void showCursor() {
+    CONSOLE_CURSOR_INFO info;
+    info.dwSize = 1;
+    info.bVisible = TRUE;
+    SetConsoleCursorInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info);
+}
+
+void clearLine(int y) {
+    gotoxy(0, y);
+    cout << "                                        ";
+}
+
+/* ================= PLAYER CLASS ================= */
 class Player {
 private:
-    int score;
+    string name;
     int lives;
-
+    int score;
 public:
-    Player() {
-        score = 0;
-        lives = 3;
-    }
-
+    Player(string n) { name = n; lives = 3; score = 0; }
     void addScore(int s) { score += s; }
-    void loseLife() { lives--; }
-
-    int getScore() { return score; }
-    int getLives() { return lives; }
+    void loseLife()      { lives--; }
+    int getLives()       { return lives; }
+    int getScore()       { return score; }
+    string getName()     { return name; }
 };
 
-// ================= QUESTION =================
-
-// ================= QUESTION =================
+/* ================= ABSTRACT QUESTION CLASS ================= */
 class Question {
-private:
-    int a, b, ans;
+protected:
+    int a, b;
     char op;
-
+    int answer;
+    int points;
 public:
-    void generate() {
-
-        int operation = rand() % 4;  // 0=+, 1=-, 2=*, 3=/
-
-        if (operation == 0) { // Addition
-            a = rand() % 20;
-            b = rand() % 20;
-            ans = a + b;
-            op = '+';
-        }
-        else if (operation == 1) { // Subtraction
-            a = rand() % 20;
-            b = rand() % 20;
-            ans = a - b;
-            op = '-';
-        }
-        else if (operation == 2) { // Multiplication
-            a = rand() % 12;
-            b = rand() % 12;
-            ans = a * b;
-            op = '*';
-        }
-        else { // Division (safe integer division)
-
-            b = (rand() % 9) + 1;   // Never 0
-            ans = (rand() % 10) + 1;
-            a = b * ans;            // Ensures perfect division
-
-            op = '/';
-        }
+    virtual void generate() = 0;
+    bool checkAnswer(int userAns) { return userAns == answer; }
+    int getPoints() { return points; }
+    string getQuestionText() {
+        return to_string(a) + " " + op + " " + to_string(b) + " = ?";
     }
+    virtual ~Question() {}
+};
 
-    int getAnswer() {
-        return ans;
-    }
-
-    string getText() {
-        return to_string(a) + " " + op + " " + to_string(b);
+class EasyQuestion : public Question {
+public:
+    void generate() override {
+        a = rand() % 10 + 1; b = rand() % 10 + 1;
+        op = '+'; answer = a + b; points = 10;
     }
 };
 
-// ================= GAME =================
+class MediumQuestion : public Question {
+public:
+    void generate() override {
+        a = rand() % 15 + 5; b = rand() % 10 + 1;
+        op = '-'; answer = a - b; points = 20;
+    }
+};
+
+class HardQuestion : public Question {
+public:
+    void generate() override {
+        a = rand() % 10 + 2; b = rand() % 10 + 2;
+        op = '*'; answer = a * b; points = 30;
+    }
+};
+
+class ExpertQuestion : public Question {
+public:
+    void generate() override {
+        b = rand() % 9 + 2;
+        int multiplier = rand() % 10 + 1;
+        a = b * multiplier;
+        op = '/'; answer = a / b; points = 40;
+    }
+};
+
+/* ================= LAYOUT CONSTANTS ================= */
+const int HEADER_ROWS = 7;    // rows 0-6 used by header
+const int DROP_ROWS   = 12;   // question travels 12 rows down
+const int INPUT_ROW   = HEADER_ROWS + DROP_ROWS + 1;
+const int TIME_LIMIT  = 5;    // seconds before time's up
+
+// Drop speed: question moves 1 row every DROP_INTERVAL milliseconds
+// 12 rows / 5 seconds = need ~400ms per row to fill exactly 5 seconds
+// We use 350ms so it reaches bottom slightly before time runs out
+const int DROP_INTERVAL = 350;
+
+/* ================= GAME CLASS ================= */
 class Game {
 private:
-    Player player;
+    Player* player;
+    int highScore;
 
 public:
-    void play() {
+    Game() { highScore = loadHighScore(); }
 
+    int loadHighScore() {
+        ifstream file("highscore.txt");
+        int hs = 0;
+        if (file >> hs) return hs;
+        return 0;
+    }
+
+    void saveHighScore(int score) {
+        if (score > highScore) {
+            ofstream file("highscore.txt");
+            file << score;
+        }
+    }
+
+    void drawHeader() {
+        gotoxy(0, 0); cout << "=============================";
+        gotoxy(0, 1); cout << "       MATH DROP GAME        ";
+        gotoxy(0, 2); cout << "=============================";
+        gotoxy(0, 6); cout << "-----------------------------";
+    }
+
+    void updateHeader(int timeLeft) {
+        // Lives
+        gotoxy(0, 3);
+        cout << "Lives: ";
+        for (int i = 0; i < player->getLives(); i++)  cout << "<3 ";
+        for (int i = player->getLives(); i < 3; i++)  cout << "    ";
+
+        // Score
+        gotoxy(0, 4);
+        cout << "Score: " << player->getScore() << "      ";
+
+        // Timer bar — shrinks from right to left as time runs out
+        gotoxy(0, 5);
+        cout << "Time:  [";
+        for (int i = 0; i < timeLeft; i++)          cout << "#";
+        for (int i = timeLeft; i < TIME_LIMIT; i++) cout << ".";
+        cout << "] " << timeLeft << "s ";
+    }
+
+    Question* createQuestion() {
+        int r = rand() % 4;
+        Question* q;
+        if      (r == 0) q = new EasyQuestion();
+        else if (r == 1) q = new MediumQuestion();
+        else if (r == 2) q = new HardQuestion();
+        else             q = new ExpertQuestion();
+        q->generate();
+        return q;
+    }
+
+    bool dropQuestion(Question* q, int& userAns) {
+        string text     = "  >> " + q->getQuestionText() + "  ";
+        string input    = "";
+        int currentRow  = HEADER_ROWS;   // start just below the header line
+        int prevRow     = -1;
+
+        DWORD startMs   = GetTickCount();   // millisecond timer for smooth drop
+        DWORD lastDrop  = startMs;          // when did we last move the question down
+
+        while (true) {
+            DWORD now     = GetTickCount();
+            int elapsedMs = (int)(now - startMs);
+            int timeLeft  = TIME_LIMIT - (elapsedMs / 1000);
+
+            // Time is up
+            if (timeLeft <= 0) return false;
+
+            // --- UPDATE TIMER BAR (every loop, very cheap) ---
+            updateHeader(timeLeft);
+
+            // --- DROP THE QUESTION (only when DROP_INTERVAL ms has passed) ---
+            if ((int)(now - lastDrop) >= DROP_INTERVAL) {
+                lastDrop = now;
+
+                // Erase old row
+                if (prevRow != -1) clearLine(prevRow);
+
+                // Draw at new row
+                gotoxy(0, currentRow);
+                cout << text;
+                prevRow = currentRow;
+
+                // Move down for next step, stop at the bottom
+                if (currentRow < HEADER_ROWS + DROP_ROWS) {
+                    currentRow++;
+                }
+            }
+
+            // --- DRAW INPUT LINE (always at fixed row) ---
+            gotoxy(0, INPUT_ROW);
+            showCursor();
+            cout << "Answer: " << input << "  ";
+            gotoxy(8 + (int)input.size(), INPUT_ROW);
+
+            // --- READ KEYBOARD (non-blocking) ---
+            if (_kbhit()) {
+                char ch = _getch();
+
+                if (ch == '\r' && !input.empty()) {
+                    userAns = stoi(input);
+                    hideCursor();
+                    return true;
+                }
+                else if (ch == 8 && !input.empty()) {
+                    input.pop_back();
+                }
+                else if ((ch == '-' && input.empty()) || isdigit(ch)) {
+                    input += ch;
+                }
+            }
+
+            Sleep(30); // ~30fps loop, smooth with no flicker
+        }
+    }
+
+    void start() {
         srand(time(0));
+        system("cls");
+        hideCursor();
 
-        const int DEADLINE_Y = 18;
-        const int START_Y = 2;
+        // Name entry screen
+        showCursor();
+        gotoxy(0, 0); cout << "=============================";
+        gotoxy(0, 1); cout << "       MATH DROP GAME        ";
+        gotoxy(0, 2); cout << "=============================";
+        gotoxy(0, 4); cout << "Enter Player Name: ";
+        string name;
+        cin >> name;
+        player = new Player(name);
 
-        const int TOTAL_TIME_MS = 5000;   // 5 seconds
-        const int FRAME_DELAY = 50;       // smoothness
-        const int TOTAL_FRAMES = TOTAL_TIME_MS / FRAME_DELAY;
+        system("cls");
+        hideCursor();
+        drawHeader();
 
-        while (player.getLives() > 0) {
+        while (player->getLives() > 0) {
+            // Clear drop zone + input area
+            for (int i = HEADER_ROWS; i <= INPUT_ROW + 1; i++)
+                clearLine(i);
 
-            Question q;
-            q.generate();
+            Question* q = createQuestion();
+            int userAns = 0;
 
-            string input = "";
-            bool answered = false;
+            bool answeredInTime = dropQuestion(q, userAns);
 
-            float position = START_Y;
-            float step = (float)(DEADLINE_Y - START_Y) / TOTAL_FRAMES;
+            // Clear drop zone
+            for (int i = HEADER_ROWS; i <= INPUT_ROW + 1; i++)
+                clearLine(i);
 
-            for (int frame = 0; frame <= TOTAL_FRAMES; frame++) {
-
-                // Clear falling area
-                for (int i = START_Y; i <= DEADLINE_Y + 2; i++) {
-                    gotoXY(0, i);
-                    cout << "                                                ";
-                }
-
-                // Remaining time
-                int timeLeft = (TOTAL_FRAMES - frame) * FRAME_DELAY / 1000;
-
-                // Score + Timer
-                gotoXY(0, 0);
-                cout << "Lives: " << player.getLives()
-                     << "   Score: " << player.getScore()
-                     << "   Time Left: " << timeLeft << "s   ";
-
-                // Deadline line
-                gotoXY(0, DEADLINE_Y);
-                cout << "--------------------------------------------";
-                gotoXY(5, DEADLINE_Y);
-                cout << " ANSWER BEFORE THIS LINE ";
-
-                // Draw question
-                gotoXY(15, (int)position);
-                cout << q.getText() << " = ?";
-
-                // Input area
-                gotoXY(0, DEADLINE_Y + 3);
-                cout << "Your Answer: " << input << "   ";
-
-                // Keyboard input
-                if (_kbhit()) {
-                    char ch = _getch();
-
-                    if (ch == 13) { // ENTER
-                        answered = true;
-                        break;
-                    }
-                    else if (ch == 8) { // BACKSPACE
-                        if (!input.empty())
-                            input.pop_back();
-                    }
-                    else if (isdigit(ch)) {
-                        input += ch;
-                    }
-                }
-
-                position += step;
-
-                this_thread::sleep_for(chrono::milliseconds(FRAME_DELAY));
-            }
-
-            // ===== RESULT =====
-            if (answered && !input.empty()) {
-                int userAns = stoi(input);
-
-                if (userAns == q.getAnswer()) {
-                    gotoXY(0, DEADLINE_Y + 5);
-                    cout << "Correct!                 ";
-                    player.addScore(10);
-                } else {
-                    gotoXY(0, DEADLINE_Y + 5);
-                    cout << "Wrong!                   ";
-                    player.loseLife();
-                }
+            // Show result
+            gotoxy(0, HEADER_ROWS + DROP_ROWS / 2);
+            if (!answeredInTime) {
+                cout << "   *** TIME'S UP! Lost a life! ***  ";
+                player->loseLife();
+            } else if (q->checkAnswer(userAns)) {
+                cout << "   *** CORRECT! +" << q->getPoints() << " points! ***    ";
+                player->addScore(q->getPoints());
             } else {
-                gotoXY(0, DEADLINE_Y + 5);
-                cout << "Time Up!                 ";
-                player.loseLife();
+                cout << "   *** WRONG! Lost a life! ***      ";
+                player->loseLife();
             }
 
-            this_thread::sleep_for(chrono::seconds(1));
+            updateHeader(0);
+            Sleep(1200);
+            delete q;
         }
 
-        // ===== GAME OVER =====
-        gotoXY(0, DEADLINE_Y + 7);
-        cout << "===== GAME OVER =====\n";
-        cout << "Final Score: " << player.getScore() << endl;
+        // Game Over
+        system("cls");
+        showCursor();
+        cout << "=============================\n";
+        cout << "          GAME OVER          \n";
+        cout << "=============================\n";
+        cout << "Player:      " << player->getName() << "\n";
+        cout << "Final Score: " << player->getScore() << "\n";
+        saveHighScore(player->getScore());
+        if (player->getScore() > highScore)
+            cout << "*** New High Score! ***\n";
+        cout << "=============================\n";
+        delete player;
     }
 };
 
-// ================= MAIN =================
+/* ================= MAIN ================= */
 int main() {
-    Game g;
-    g.play();
+    Game game;
+    game.start();
     return 0;
-}
+}g
